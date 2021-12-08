@@ -14,8 +14,7 @@
 #sed -i 's/192.168.1.1/192.168.50.5/g' package/base-files/files/bin/config_generate
 
 # Modify default theme  
-sed -ri 's/luci-theme-\S+/luci-theme-argon_new/g' feeds/luci/collections/luci/Makefile  # feeds/luci/modules/luci-base/root/etc/config/luci
-
+# sed -ri 's/luci-theme-\S+/luci-theme-argon_new/g' feeds/luci/collections/luci/Makefile  # feeds/luci/modules/luci-base/root/etc/config/luci
 
 # luci-theme-atmaterial_new
 # https://github.com/kenzok8/openwrt-packages 已经添加了，所以这里备用拉取
