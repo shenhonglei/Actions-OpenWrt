@@ -49,11 +49,14 @@ env:
   UPLOAD_WETRANSFER: false
   UPLOAD_RELEASE: false
   TZ: Asia/Shanghai
-  DOCKER_PASS: ${{ secrets.DOCKER_PASS }} 
+  DOCKER_PASS: ${{ secrets.DOCKER_PASS }}
+  NOT_PUSH: ${{ secrets.NOT_PUSH }}
 
 jobs:
   build:
     runs-on: ${{ github.event.inputs.os }}
+    outputs:
+      imageBuilder: ${{ steps.organize.outputs.imageBuilder }}
     name: "编译 ${{matrix.target}} - config: ${{ github.event.inputs.config }}"
     strategy:
       fail-fast: false
@@ -80,21 +83,28 @@ jobs:
       run: |
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo -E apt-get -qq update
-        sudo -E apt-get -qq install python3-markdown $(curl -fsSL git.io/depends-ubuntu-2004)
+        sudo -E apt-get -qq install python3-markdown $(curl -fsSL git.io/depends-ubuntu-2004) zstd upx
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
-        sudo mkdir -p /workdir
-        sudo chown $USER:$GROUPS /workdir
+        sudo mkdir -p /workdir 
+        sudo chown $USER:$GROUPS /workdir 
+        # install github cli tool
+        wget https://github.com/cli/cli/releases/download/v2.4.0/gh_2.4.0_linux_amd64.tar.gz
+        find gh_* -type f -name gh -exec mv {} . \;
+        sudo chmod a+x gh
+        sudo mv gh /usr/local/bin/
+        gh auth login --with-token <<< ${{ secrets.gh_token }}
 
     - name: Clone source code
       working-directory: /workdir
       run: |
         df -hT $PWD
         git clone $REPO_URL -b $REPO_BRANCH openwrt
-        \cp -a ${GITHUB_WORKSPACE}/build/${{matrix.target}}/* ${GITHUB_WORKSPACE}/
+        \cp -a ${GITHUB_WORKSPACE}/build/${{matrix.target}}/* ${GITHUB_WORKSPACE}/build/common.buildinfo ${GITHUB_WORKSPACE}/
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
         readlink -f $GITHUB_WORKSPACE/openwrt
+        ls -l . openwrt
 
     - name: Load custom feeds
       run: |
@@ -114,10 +124,54 @@ jobs:
         [ -e files ] && mv files openwrt/files
         export CONFIG=${{ github.event.inputs.config }}
         echo "use the .config file:" "${CONFIG}"
-        mv config/${CONFIG} openwrt/.config
+        cp config/${CONFIG} openwrt/.config
+        cp common.buildinfo openwrt/
+        cat openwrt/common.buildinfo >> openwrt/.config
         chmod +x $DIY_P2_SH
+        
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P2_SH
+
+        if [ "${{matrix.target}}" != N1 ];then
+          # 开启 imagebuilder 的话此刻把原有的 .config 拷贝进去，imagebuilder的xz是调用的专门压缩，无法生成后插入文件，此处提前hack下插入文件后面用到
+          if grep -Eq '^CONFIG_IB=y' .config;then
+            mkdir -p build_dir staging_dir
+
+            gh release -R ${GITHUB_REPOSITORY} view cache | grep -Po 'asset:\s+\K\S+' > /tmp/log
+            if grep -E "lede.${{matrix.target}}.img.zst" /tmp/log;then
+              gh release -R ${GITHUB_REPOSITORY} download cache -p "lede.${{matrix.target}}.img.zst.*"
+              zstdmt -d -o lede.img  lede.${{matrix.target}}.img.zst.*
+            else
+              truncate -s 30g lede.img && mkfs.btrfs -M lede.img
+              NO_CACHE=1
+              echo "NO_CACHE=1" >> $GITHUB_ENV
+            fi
+
+            LOOP_DEVICE=$(losetup -f) && echo "LOOP_DEVICE=$LOOP_DEVICE" >> $GITHUB_ENV
+            sudo losetup -P --direct-io $LOOP_DEVICE lede.img
+            mkdir cache && sudo mount -o nossd,compress=zstd $LOOP_DEVICE cache
+            sudo chown -R $USER:$GROUPS cache
+            # https://forum.openwrt.org/t/using-precompiled-toolchain/87446/6
+            mkdir cache/{build_dir,staging_dir} openwrt/{build_dir,staging_dir}
+            (
+              cd cache
+              find build_dir/{host*,toolchain-*} -name .built\* -exec touch {} \;
+              touch staging_dir/{host*,toolchain-*}/stamp/.*
+            )
+            sudo mount --bind cache/build_dir    openwrt/build_dir
+            sudo mount --bind cache/staging_dir  openwrt/staging_dir
+
+            if [ -z "$NO_CACHE" ];then
+              cp .config config.buildinfo
+              sed_num=$( grep -n '$(TOPDIR)/.config' target/imagebuilder/Makefile | cut -d: -f1 )
+              sed -ri ${sed_num}'{s#cp#& -a $(TOPDIR)/files $(TOPDIR)/*.buildinfo#;s#.config$##;}' target/imagebuilder/Makefile
+              find package/ -type d -name luci-app-* | awk -F/ '{printf "CONFIG_PACKAGE_%s=m\n",$NF}' >> .config
+              #sed -ri 's#(^CONFIG_PACKAGE_luci-app-[^A-Z]*=)y#\1m#' .config
+              sed -ri '/CONFIG_PACKAGE_[0-9a-z-]+(=| )/{s@^#\s+@@;s@(=y|\s+is not set)@=m@}' .config
+            fi
+          fi
+        fi
+        cat .config
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
@@ -131,6 +185,19 @@ jobs:
       run: |
         cd openwrt
         make defconfig
+        sed -ri 's@^#\s(CONFIG_.+?_UPX) is not set@\1=y@' .config
+        make defconfig
+        # 开启 imagebuilder 的话 保留一个.config.bak 给非 slim 使用
+        if [ "${{matrix.target}}" != N1 ] && [ -z "$NO_CACHE" ];then
+          if grep -Eq '^CONFIG_IB=y' .config;then
+            mv .config config.slim
+            cat config.buildinfo > .config
+            make defconfig
+            cp .config full.buildinfo
+            cat config.slim > .config
+            # sed -ri '/option check_signature/s@option@#&@' ./package/system/opkg/Makefile
+          fi
+        fi
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
@@ -140,7 +207,11 @@ jobs:
       run: |
         cd openwrt
         echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
+        if [ "${{matrix.target}}" != N1 ] && [ -z "$NO_CACHE" ];then
+          time make -j$(nproc) IGNORE_ERRORS=1
+        else
+          make -j$(nproc) || make -j1 || make -j1 V=s
+        fi
         echo "::set-output name=status::success"
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
@@ -150,6 +221,7 @@ jobs:
       if: (!cancelled())
       run: |
         df -hT
+        ls -l openwrt
         ls -lh openwrt/bin/targets/*/*
 
     - name: Upload bin directory
@@ -168,12 +240,15 @@ jobs:
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "::set-output name=status::success"
+        if ls *-imagebuilder-* &>/dev/null;then
+          echo "::set-output name=imageBuilder::openwrt-imagebuilder-${{ env.DEVICE_NAME }}"
+        fi
 
     - name: Do something after Compile
       if: steps.organize.outputs.status == 'success' && !cancelled()
       run: |
         cd openwrt
-        if [ -f $GITHUB_WORKSPACE/$DIY_AFTER ];then
+        if [ -f "$GITHUB_WORKSPACE/$DIY_AFTER" ];then
           bash $GITHUB_WORKSPACE/$DIY_AFTER
         fi
 
@@ -182,7 +257,16 @@ jobs:
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
         name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-        path: ${{ env.FIRMWARE }}
+        path: |
+          ${{ env.FIRMWARE }}
+          !${{ env.FIRMWARE }}/openwrt-imagebuilder*
+
+    - name: Upload imagebuilder tar.xz
+      uses: actions/upload-artifact@main
+      if: steps.organize.outputs.imageBuilder && !cancelled()
+      with:
+        name: openwrt-imagebuilder-${{ env.DEVICE_NAME }}
+        path: ${{ env.FIRMWARE }}/*-imagebuilder*
 
     - name: Upload firmware to cowtransfer
       id: cowtransfer
@@ -222,6 +306,18 @@ jobs:
         body_path: release.txt
         files: ${{ env.FIRMWARE }}/*
 
+    - name: Upload cache to release
+      id: up_cache
+      run: |
+        if [ "${{matrix.target}}" != N1 ];then
+          sudo umount openwrt/{build_dir,staging_dir}
+          sudo losetup -l -O NAME -n | awk '$0~"/lede.img"{print $1}' | xargs -r  losetup -d
+          zstdmt -c --long lede.img | split --numeric=1 -b 2000m - lede.${{matrix.target}}.img.zst.
+          # gh release  -R zhangguanzhang/Actions-OpenWrt create cache -t '' -n '' || false
+          gh release -R ${GITHUB_REPOSITORY} create cache -t '' -n '' || false
+          gh release -R ${GITHUB_REPOSITORY} upload cache lede.*.img.zst.* --clobber
+        fi
+
     - name: Delete workflow runs
       uses: GitRML/delete-workflow-runs@main
       with:
@@ -236,3 +332,101 @@ jobs:
         delete_tags: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build_slim:
+    needs: build
+    if: needs.build.outputs.imageBuilder
+    runs-on: ${{ github.event.inputs.os }}
+    name: "编译 ${{matrix.target}} - config: ${{ github.event.inputs.config }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        target: 
+          - "slim"
+          #- ""
+    steps:
+    - name: Checkout
+      uses: actions/checkout@main
+
+    - name: install docker
+      uses: docker-practice/actions-setup-docker@master
+      
+    - name: prinf info
+      run: |
+        df -h
+        lscpu
+        free -h
+        echo 'target: ${{matrix.target}}'
+
+    - name: Initialization environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install python3-markdown $(curl -fsSL git.io/depends-ubuntu-2004)
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+        sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
+
+    - name: Download imagebuilder (Artifact)
+      uses: actions/download-artifact@v2
+      with:
+        name: ${{ needs.build.outputs.imageBuilder }}
+        path: .
+
+    - name: Compile the firmware
+      id: compile
+      run: |
+        ls -l
+        tar xf openwrt-imagebuilder-*.tar.xz
+        rm -f openwrt-imagebuilder-*.tar.xz
+        cd openwrt-imagebuilder-*
+        ls -l
+
+        echo -e "$(nproc) thread compile"
+
+        mkdir -p files/local_feed && sudo mount --bind packages files/local_feed
+        sed -i 's/luci-app-[^ ]*//g' include/target.mk $(find target/ -name Makefile)
+        #ls packages/*.ipk | xargs -n1 basename > package.list
+        #PACKAGES=$(grep -v CONFIG_PACKAGE_luci-app common.buildinfo | grep -Po '^CONFIG_PACKAGE_\K[^A-Z=]+(?==y)' | xargs -n1 -i grep -o {} package.list | sort -u | xargs echo )
+        #extra_pkgs="luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn luci-app-ttyd bash default-settings luci-app-docker -luci-app-ssr-plus -luci-app-samba"
+
+        PACKAGES=$( grep -Po '^CONFIG_PACKAGE_\K[^A-Z=]+' common.buildinfo | sort | tr '\n' ' ' )
+        extra_pkgs=" -luci-app-ssr-plus -luci-app-samba"
+        > /tmp/log
+        make image PACKAGES="$PACKAGES ${extra_pkgs}" FILES="files" |& tee -a /tmp/log
+        REMOVE_PKGS=$( grep -Po 'Cannot install package \K[^.]+' /tmp/log | awk '{printf "-%s ",$0}' )
+        if [ -n "$REMOVE_PKGS" ];then
+          echo "打包报错，已下包存在依赖问题: ${REMOVE_PKGS}"
+          echo "尝试移除上面的包打包"
+          # 不删除则会文件已存在而不更新签名，貌似这样也解决不了。。
+          rm -f files/local_feed/Packages*
+          make image PACKAGES="$PACKAGES ${extra_pkgs} ${REMOVE_PKGS}" FILES="files"
+        fi
+        #make image -j$(nproc) PACKAGES='-luci-app-ipsec-vpnd' || make image -j1 V=s PACKAGES='-luci-app-ipsec-vpnd' 
+
+        echo "::set-output name=status::success"
+        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
+    - name: Organize files
+      id: organize
+      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      run: |
+        cd openwrt-imagebuilder-*/bin/targets/*/*
+        pwd
+        ls -lh
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+        echo "::set-output name=status::success"
+
+    - name: Upload firmware directory
+      uses: actions/upload-artifact@main
+      if: steps.organize.outputs.status == 'success' && !cancelled()
+      with:
+        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}-${{matrix.target}}
+        path: |
+          ${{ env.FIRMWARE }}

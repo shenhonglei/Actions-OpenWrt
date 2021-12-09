@@ -5,10 +5,11 @@
 ```
 docker pull openwrtorg/sdk:x86_64-openwrt-21.02
 
-docker run --name openwrt --rm -tid -v /root/lede/:/home/build/openwrt openwrtorg/sdk:x86_64-openwrt-21.02
 
 git clone https://github.com/coolsnowwolf/lede.git --depth 1
 cd lede
+
+docker run --name openwrt --rm -tid -v $PWD:/home/build/openwrt openwrtorg/sdk:x86_64-openwrt-21.02
 
 docker exec -ti openwrt bash
 
@@ -78,7 +79,7 @@ Xorg  --->Xorg
 
 3：固件文件名中带有 sysupgrade 字样的文件为升级 OpenWrt 所用的固件，无需解压 gz 文件，可直接在 Luci 面板中升级。
 
-4：rootfs的镜像，不带引导，可自行定义用grub或者syslinux来引导，存储区为ext4。（小白不建议）
+4：rootfs的镜像，不带引导，可自行定义用 grub 或者 syslinux 来引导，存储区为 ext4。（小白不建议）
 
 1：config.buildinfoOpenWrt --------------------------------------------------------------------------------编译配置文件
 
@@ -112,3 +113,8 @@ cat /etc/init.d/dnsmasq
 
 /etc/init.d/dnsmasq reload
 ```
+
+https://www.youtube.com/watch?v=35ImdukpmyY
+
+
+https://openwrt.org/zh/docs/guide-user/additional-software/imagebuilder

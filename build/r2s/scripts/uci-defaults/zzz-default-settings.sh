@@ -2,10 +2,26 @@
 opkg install /*_*_*.ipk
 rm -f /*_*_*.ipk
 
-uci set  aliyundrive-webdav.@server[0].enable=0
-uci commit aliyundrive-webdav
+# slim 固件本地 opkg 配置
+if ls -l /local_feed/*.ipk &>/dev/null;then
+    sed -ri 's@^[^#]@#&@' /etc/opkg/distfeeds.conf
+    echo 'src/gz local file:///local_feed' >> /etc/opkg/customfeeds.conf
+    # 取消签名，暂时解决不了
+    sed -ri '/check_signature/s@^[^#]@#&@' /etc/opkg.conf
+fi
 
-uci set luci.main.mediaurlbase='/luci-static/argon_blue'
+if [ -f /etc/uci-defaults/luci-aliyundrive-webdav ];then
+    uci set  aliyundrive-webdav.@server[0].enable=0
+    uci commit aliyundrive-webdav
+fi
+
+# 默认主题
+if [ -d /usr/lib/lua/luci/view/themes/argonne/ ];then
+    uci set luci.main.mediaurlbase='/luci-static/argonne'
+fi
+if [ -d /usr/lib/lua/luci/view/themes/argon_blue/ ];then
+    uci set luci.main.mediaurlbase='/luci-static/argon_blue'
+fi
 uci commit luci
 # 此文件名注意ls 排序，下面也行
 # sed -ri "/option mediaurlbase/s#(/luci-static/)[^']+#\1argon_blue#" /etc/config/luci

@@ -4,7 +4,7 @@ function upload_dockerhub(){
 
     local hub_img=zhangguanzhang/r2s BUILD_DIR=$(mktemp -d)
     local BRANCH=${GITHUB_REF##*/}
-    local file=$1
+    local file=$(basename $1)
     local tag=release-$(date +%Y-%m-%d)
     local FSTYPE=${file##*r2s-}
     FSTYPE=${FSTYPE%-*}
@@ -13,6 +13,8 @@ function upload_dockerhub(){
     cp $(dirname $1)/{sha256sums,config.buildinfo,feeds.buildinfo,version.buildinfo} ${BUILD_DIR}/
 cat >${BUILD_DIR}/Dockerfile << EOF
 FROM alpine
+LABEL FILE=$file
+LABEL NUM=${GITHUB_RUN_NUMBER}
 COPY * /
 EOF
     [ "${BRANCH}" != main ] && tag=latest
@@ -33,7 +35,7 @@ EOF
 }
 
 function upload(){
-    if [ -n "${DOCKER_PASS}" ];then
+    if [ -n "${DOCKER_PASS}" ] && [ -z "${NOT_PUSH}" ];then
         upload_dockerhub $1
     fi    
 }

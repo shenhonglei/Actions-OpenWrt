@@ -13,8 +13,10 @@
 # Modify default IP
 #sed -i 's/192.168.1.1/192.168.50.5/g' package/base-files/files/bin/config_generate
 
-# Modify default theme  
-# sed -ri 's/luci-theme-\S+/luci-theme-argon_new/g' feeds/luci/collections/luci/Makefile  # feeds/luci/modules/luci-base/root/etc/config/luci
+# Modify default theme
+# https://github.com/jerrykuku/luci-theme-argon/tree/18.06
+# https://github.com/kenzok8/openwrt-packages
+sed -ri 's/luci-theme-\S+/luci-theme-argonne/g' feeds/luci/collections/luci/Makefile  # feeds/luci/modules/luci-base/root/etc/config/luci
 
 # luci-theme-atmaterial_new
 # https://github.com/kenzok8/openwrt-packages 已经添加了，所以这里备用拉取
@@ -50,7 +52,7 @@ chmod a+x ${GITHUB_WORKSPACE}/build/scripts/*.sh
 \cp -a ${GITHUB_WORKSPACE}/build/scripts/update.sh files/
 
 # 修改banner
-echo -e " built on "$(date '+%Y.%m.%d %H:%M')"\n -----------------------------------------------------" >> package/base-files/files/etc/banner
+echo -e " built on "$(TZ=Asia/Shanghai date '+%Y.%m.%d %H:%M') - ${GITHUB_RUN_NUMBER}"\n -----------------------------------------------------" >> package/base-files/files/etc/banner
 
 # /tmp/resolv.conf.d/resolv.conf.auto
 # mkdir -p files/tmp/resolv.conf.d/
@@ -62,3 +64,7 @@ echo -e " built on "$(date '+%Y.%m.%d %H:%M')"\n -------------------------------
 if [ -n "${DOCKER_PASS}" ];then
     docker login -u zhangguanzhang -p ${DOCKER_PASS}
 fi
+
+# https://github.com/coolsnowwolf/lede/issues/8423
+# https://github.com/coolsnowwolf/packages/pull/315 回退后删掉这三行
+sed -i 's/^\s*$[(]call\sEnsureVendoredVersion/#&/' feeds/packages/utils/dockerd/Makefile
