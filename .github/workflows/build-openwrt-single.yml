@@ -91,9 +91,9 @@ jobs:
         sudo chown $USER:$GROUPS /workdir 
         # install github cli tool
         wget https://github.com/cli/cli/releases/download/v2.4.0/gh_2.4.0_linux_amd64.tar.gz
-        find gh_* -type f -name gh -exec mv {} . \;
-        sudo chmod a+x gh
-        sudo mv gh /usr/local/bin/
+        tar zxf gh_*_linux_amd64.tar.gz
+        find gh_* -type f -name gh -exec mv {} /usr/local/bin/ \;
+        sudo chmod a+x /usr/local/bin/gh
         gh auth login --with-token <<< ${{ secrets.gh_token }}
 
     - name: Clone source code
@@ -121,26 +121,29 @@ jobs:
 
     - name: Load custom configuration
       run: |
+        set -x
         [ -e files ] && mv files openwrt/files
         export CONFIG=${{ github.event.inputs.config }}
         echo "use the .config file:" "${CONFIG}"
         cp config/${CONFIG} openwrt/.config
         cp common.buildinfo openwrt/
-        cat openwrt/common.buildinfo >> openwrt/.config
+        # ---- 前的行写入
+        sed -n '/---/{q};p' openwrt/common.buildinfo >> openwrt/.config
         chmod +x $DIY_P2_SH
         
-        cd openwrt
+        pushd openwrt
         $GITHUB_WORKSPACE/$DIY_P2_SH
+        popd
 
         if [ "${{matrix.target}}" != N1 ];then
           # 开启 imagebuilder 的话此刻把原有的 .config 拷贝进去，imagebuilder的xz是调用的专门压缩，无法生成后插入文件，此处提前hack下插入文件后面用到
-          if grep -Eq '^CONFIG_IB=y' .config;then
-            mkdir -p build_dir staging_dir
-
-            gh release -R ${GITHUB_REPOSITORY} view cache | grep -Po 'asset:\s+\K\S+' > /tmp/log
+          if grep -Eq '^CONFIG_IB=y'  openwrt/.config;then
+            gh release -R ${GITHUB_REPOSITORY} list | grep -Ew cache || gh release -R ${GITHUB_REPOSITORY} create cache -t '' -n ''
+            gh release -R ${GITHUB_REPOSITORY} view cache 2>/dev/null | grep -Po 'asset:\s+\K\S+' > /tmp/log || true
             if grep -E "lede.${{matrix.target}}.img.zst" /tmp/log;then
               gh release -R ${GITHUB_REPOSITORY} download cache -p "lede.${{matrix.target}}.img.zst.*"
-              zstdmt -d -o lede.img  lede.${{matrix.target}}.img.zst.*
+              cat lede.*.img.zst.* | zstdmt -d -o lede.img
+              rm -f lede.*.img.zst.*
             else
               truncate -s 30g lede.img && mkfs.btrfs -M lede.img
               NO_CACHE=1
@@ -152,15 +155,17 @@ jobs:
             mkdir cache && sudo mount -o nossd,compress=zstd $LOOP_DEVICE cache
             sudo chown -R $USER:$GROUPS cache
             # https://forum.openwrt.org/t/using-precompiled-toolchain/87446/6
-            mkdir cache/{build_dir,staging_dir} openwrt/{build_dir,staging_dir}
+            mkdir -p cache/{build_dir,staging_dir} openwrt/{build_dir,staging_dir}
             (
-              cd cache
-              find build_dir/{host*,toolchain-*} -name .built\* -exec touch {} \;
-              touch staging_dir/{host*,toolchain-*}/stamp/.*
+              if [ -z "$NO_CACHE" ];then
+                cd cache
+                find build_dir/{host*,toolchain-*} -name .built\* -exec touch {} \;
+                touch staging_dir/{host*,toolchain-*}/stamp/.*
+              fi
             )
             sudo mount --bind cache/build_dir    openwrt/build_dir
             sudo mount --bind cache/staging_dir  openwrt/staging_dir
-
+            pushd openwrt
             if [ -z "$NO_CACHE" ];then
               cp .config config.buildinfo
               sed_num=$( grep -n '$(TOPDIR)/.config' target/imagebuilder/Makefile | cut -d: -f1 )
@@ -169,9 +174,15 @@ jobs:
               #sed -ri 's#(^CONFIG_PACKAGE_luci-app-[^A-Z]*=)y#\1m#' .config
               sed -ri '/CONFIG_PACKAGE_[0-9a-z-]+(=| )/{s@^#\s+@@;s@(=y|\s+is not set)@=m@}' .config
             fi
+            popd
           fi
         fi
-        cat .config
+        if [ ! -f 'openwrt/config.buildinfo' ];then
+          cp openwrt/.config openwrt/config.buildinfo
+        fi
+        sed -n '/---/,$p' openwrt/common.buildinfo >> openwrt/.config
+        sed -n '/---/,$p' openwrt/common.buildinfo >> openwrt/config.buildinfo
+        cat openwrt/.config
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
@@ -193,7 +204,7 @@ jobs:
             mv .config config.slim
             cat config.buildinfo > .config
             make defconfig
-            cp .config full.buildinfo
+            cp .config full.buildinfo # 非slim的文件
             cat config.slim > .config
             # sed -ri '/option check_signature/s@option@#&@' ./package/system/opkg/Makefile
           fi
@@ -208,7 +219,7 @@ jobs:
         cd openwrt
         echo -e "$(nproc) thread compile"
         if [ "${{matrix.target}}" != N1 ] && [ -z "$NO_CACHE" ];then
-          time make -j$(nproc) IGNORE_ERRORS=1
+          time make -j$(nproc) IGNORE_ERRORS=1 || make -j1 IGNORE_ERRORS=1 || make -j1 V=s IGNORE_ERRORS=1
         else
           make -j$(nproc) || make -j1 || make -j1 V=s
         fi
@@ -308,13 +319,12 @@ jobs:
 
     - name: Upload cache to release
       id: up_cache
+      if: '!cancelled()'
       run: |
         if [ "${{matrix.target}}" != N1 ];then
-          sudo umount openwrt/{build_dir,staging_dir}
+          sudo umount openwrt/{build_dir,staging_dir} cache
           sudo losetup -l -O NAME -n | awk '$0~"/lede.img"{print $1}' | xargs -r  losetup -d
           zstdmt -c --long lede.img | split --numeric=1 -b 2000m - lede.${{matrix.target}}.img.zst.
-          # gh release  -R zhangguanzhang/Actions-OpenWrt create cache -t '' -n '' || false
-          gh release -R ${GITHUB_REPOSITORY} create cache -t '' -n '' || false
           gh release -R ${GITHUB_REPOSITORY} upload cache lede.*.img.zst.* --clobber
         fi
 
@@ -343,7 +353,7 @@ jobs:
       matrix:
         target: 
           - "slim"
-          #- ""
+          - ""
     steps:
     - name: Checkout
       uses: actions/checkout@main
@@ -387,25 +397,33 @@ jobs:
         ls -l
 
         echo -e "$(nproc) thread compile"
+        ls -1 packages/*.ipk | wc -l
 
-        mkdir -p files/local_feed && sudo mount --bind packages files/local_feed
-        sed -i 's/luci-app-[^ ]*//g' include/target.mk $(find target/ -name Makefile)
-        #ls packages/*.ipk | xargs -n1 basename > package.list
-        #PACKAGES=$(grep -v CONFIG_PACKAGE_luci-app common.buildinfo | grep -Po '^CONFIG_PACKAGE_\K[^A-Z=]+(?==y)' | xargs -n1 -i grep -o {} package.list | sort -u | xargs echo )
-        #extra_pkgs="luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn luci-app-ttyd bash default-settings luci-app-docker -luci-app-ssr-plus -luci-app-samba"
-
-        PACKAGES=$( grep -Po '^CONFIG_PACKAGE_\K[^A-Z=]+' common.buildinfo | sort | tr '\n' ' ' )
-        extra_pkgs=" -luci-app-ssr-plus -luci-app-samba"
         > /tmp/log
-        make image PACKAGES="$PACKAGES ${extra_pkgs}" FILES="files" |& tee -a /tmp/log
-        REMOVE_PKGS=$( grep -Po 'Cannot install package \K[^.]+' /tmp/log | awk '{printf "-%s ",$0}' )
-        if [ -n "$REMOVE_PKGS" ];then
-          echo "打包报错，已下包存在依赖问题: ${REMOVE_PKGS}"
-          echo "尝试移除上面的包打包"
-          # 不删除则会文件已存在而不更新签名，貌似这样也解决不了。。
-          rm -f files/local_feed/Packages*
-          make image PACKAGES="$PACKAGES ${extra_pkgs} ${REMOVE_PKGS}" FILES="files"
+        if [ "${{matrix.target}}" != N1 ];then
+          mkdir -p files/local_feed && sudo mount --bind packages files/local_feed
+          sed -i 's/luci-app-[^ ]*//g' include/target.mk $(find target/ -name Makefile)
+          #ls packages/*.ipk | xargs -n1 basename > package.list
+          #PACKAGES=$(grep -v CONFIG_PACKAGE_luci-app common.buildinfo | grep -Po '^CONFIG_PACKAGE_\K[^A-Z=]+(?==y)' | xargs -n1 -i grep -o {} package.list | sort -u | xargs echo )
+          #extra_pkgs="luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn luci-app-ttyd bash default-settings luci-app-docker -luci-app-ssr-plus -luci-app-samba"
+
+          PACKAGES=$( grep -Po '^CONFIG_PACKAGE_\K[^A-Z=]+' common.buildinfo | sort | tr '\n' ' ' )
+          extra_pkgs=" -luci-app-ssr-plus -luci-app-samba"
+          make image PACKAGES="$PACKAGES ${extra_pkgs}" FILES="files" |& tee -a /tmp/log
+          REMOVE_PKGS=$( grep -Po 'Cannot install package \K[^.]+' /tmp/log | awk '{printf "-%s ",$0}' )
+          if [ -n "$REMOVE_PKGS" ];then
+            echo "打包报错，已下包存在依赖问题: ${REMOVE_PKGS}"
+            echo "尝试移除上面的包打包"
+            # 不删除则会文件已存在而不更新签名，貌似这样也解决不了。。
+            rm -f files/local_feed/Packages*
+            make image PACKAGES="$PACKAGES ${extra_pkgs} ${REMOVE_PKGS}" FILES="files"
+          fi
+          echo "suffix=-slim" >> $GITHUB_ENV
+        else
+          make image FILES="files"
+          echo "suffix=" >> $GITHUB_ENV
         fi
+
         #make image -j$(nproc) PACKAGES='-luci-app-ipsec-vpnd' || make image -j1 V=s PACKAGES='-luci-app-ipsec-vpnd' 
 
         echo "::set-output name=status::success"
@@ -427,6 +445,6 @@ jobs:
       uses: actions/upload-artifact@main
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}-${{matrix.target}}
+        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}${{ env.suffix }}
         path: |
           ${{ env.FIRMWARE }}

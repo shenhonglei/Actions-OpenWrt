@@ -29,3 +29,12 @@ echo "src-git others https://github.com/kenzok8/openwrt-packages" >> feeds.conf.
 
 # Change default shell to bash
 sed -i 's/\/bin\/ash/\/bin\/bash/g' package/base-files/files/etc/passwd
+
+# Clone community packages to package/community
+mkdir package/community
+pushd package/community
+
+# Add luci-app-oled (R2S Only)
+git clone --depth=1 https://github.com/NateLol/luci-app-oled
+# enable r2s oled plugin by default
+sed -ri "s/enable\s+'0'/enable '1'/" luci-app-oled/root/etc/config/oled

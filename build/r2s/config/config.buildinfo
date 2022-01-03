@@ -169,6 +169,13 @@ CONFIG_PACKAGE_kmod-rt2x00-usb=y
 CONFIG_PACKAGE_kmod-rt73-usb=y
 CONFIG_PACKAGE_kmod-zd1211rw=y
 
+#
+# I2C support for oled
+#
+# CONFIG_PACKAGE_kmod-i2c-core is not set
+# CONFIG_PACKAGE_i2c-tools is not set
+# CONFIG_PACKAGE_libi2c is not set
+
 # Kmod
 CONFIG_PACKAGE_kmod-rtl8187=y
 CONFIG_PACKAGE_kmod-rtl8192c-common=y
@@ -445,9 +452,3 @@ CONFIG_PACKAGE_coreutils-stat=y
 # https://github.com/coolsnowwolf/lede/issues/7816#issuecomment-915827711
 # CONFIG_PACKAGE_qtn-utils is not set
 # CONFIG_PACKAGE_kmod-qtn-pcie2 is not set
-
-# 20210909报错
-# CONFIG_PACKAGE_kmod-qca-nss-ecm-noload is not set
-# CONFIG_PACKAGE_kmod-qca-nss-ecm-premium is not set
-# CONFIG_PACKAGE_kmod-qca-nss-ecm-premium-noload is not set
-# CONFIG_PACKAGE_kmod-qca-nss-ecm-standard is not set
