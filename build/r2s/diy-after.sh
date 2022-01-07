@@ -20,7 +20,7 @@ LABEL FILE=$file
 LABEL NUM=${GITHUB_RUN_NUMBER}
 COPY * /
 EOF
-    [ "${BRANCH}" != main ] && tag=latest${target}
+    [ "${BRANCH}" != main ] && tag=latest
 
     local build_img=${hub_img}:${tag}-${FSTYPE}${target}
 

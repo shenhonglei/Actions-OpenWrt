@@ -13,10 +13,34 @@
 # Modify default IP
 #sed -i 's/192.168.1.1/192.168.50.5/g' package/base-files/files/bin/config_generate
 
+# https://github.com/coolsnowwolf/packages/issues/352
+rm -f feeds/packages/utils/dockerd/files{/etc/config/dockerd,/etc/docker/daemon.json,/etc/init.d/dockerd}
+SED_NUM=$( grep -n '^\s*/etc/config/dockerd' feeds/packages/utils/dockerd/Makefile | awk -F: '$0~":"{print $1}')
+if [ -n "$SED_NUM" ];then
+    sed -ri "$[SED_NUM-1],$[SED_NUM+1]d" feeds/packages/utils/dockerd/Makefile
+fi
+sed -ri '\%/files/(daemon.json|dockerd.init|etc/config/dockerd)%d' feeds/packages/utils/dockerd/Makefile
+sed -ri '\%\$\(INSTALL_DIR\) \$\(1\)/etc/(docker|init\.d|config)%d' feeds/packages/utils/dockerd/Makefile
+
+# https://github.com/vernesong/OpenClash/issues/1930
+# if [ -d feeds/others/luci-app-openclash ];then
+#     sed -i '2a [ ! -f /etc/openwrt_release ] && exit 0' feeds/others/luci-app-openclash/root/etc/init.d/openclash
+# fi
+
 # Modify default theme
 # https://github.com/jerrykuku/luci-theme-argon/tree/18.06
 # https://github.com/kenzok8/openwrt-packages
 sed -ri 's/luci-theme-\S+/luci-theme-argonne/g' feeds/luci/collections/luci/Makefile  # feeds/luci/modules/luci-base/root/etc/config/luci
+
+# https://github.com/openwrt/luci/issues/5638
+sed -i '2a [ ! -f /etc/openwrt_release ] && exit 0' package/lean/luci-app-filetransfer/root/etc/uci-defaults/luci-filetransfer
+#[ -f ./feeds/others/luci-theme-argonne/Makefile ] && sed -i '/LUCI_DEPENDS/s#=#&+libc#' ./feeds/others/luci-theme-argonne/Makefile
+if [ -f ./feeds/others/luci-theme-argonne/Makefile ];then
+    SED_NUM=$( grep -Pn '^\s*define\s+Package/\S+/postinst' ./feeds/others/luci-theme-argonne/Makefile |  awk -F: '$0~":"{print $1}')
+    if [ -n "SED_NUM" ];then
+        sed -i "$[SED_NUM+2]i [ ! -f /etc/openwrt_release ] && exit 0" ./feeds/others/luci-theme-argonne/Makefile
+    fi
+fi
 
 # luci-theme-atmaterial_new
 # https://github.com/kenzok8/openwrt-packages 已经添加了，所以这里备用拉取
@@ -61,9 +85,6 @@ echo -e " built on "$(TZ=Asia/Shanghai date '+%Y.%m.%d %H:%M') - ${GITHUB_RUN_NU
 
 # ---------- end -----------
 
-if [ -n "${DOCKER_PASS}" ];then
-    docker login -u zhangguanzhang -p ${DOCKER_PASS}
-fi
 
 # https://github.com/coolsnowwolf/lede/issues/8423
 # https://github.com/coolsnowwolf/packages/pull/315 回退后删掉这三行

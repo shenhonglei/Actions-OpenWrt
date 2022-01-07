@@ -38,3 +38,4 @@ pushd package/community
 git clone --depth=1 https://github.com/NateLol/luci-app-oled
 # enable r2s oled plugin by default
 sed -ri "s/enable\s+'0'/enable '1'/" luci-app-oled/root/etc/config/oled
+popd

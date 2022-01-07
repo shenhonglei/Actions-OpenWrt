@@ -5,7 +5,7 @@ rm -f /*_*_*.ipk
 # slim 固件本地 opkg 配置
 if ls -l /local_feed/*.ipk &>/dev/null;then
     sed -ri 's@^[^#]@#&@' /etc/opkg/distfeeds.conf
-    echo 'src/gz local file:///local_feed' >> /etc/opkg/customfeeds.conf
+    grep -E '/local_feed' /etc/opkg/customfeeds.conf || echo 'src/gz local file:///local_feed' >> /etc/opkg/customfeeds.conf
     # 取消签名，暂时解决不了
     sed -ri '/check_signature/s@^[^#]@#&@' /etc/opkg.conf
 fi
@@ -42,10 +42,13 @@ uci commit dropbear
 # 配合下面的单个端口，或者放行整个段
 # iptables -I input_wan_rule -p tcp -m tcp --dport 22 -j ACCEPT
 # 二级路由的话放行上层的  CIDR 即可
+
+if ! grep -Eq 'iptables -I input_wan_rule -s \S+\s+-j ACCEPT' /etc/firewall.user;then
 cat >> /etc/firewall.user << EOF
 # 允许wan口指定网段访问，一般二级路由下需要
 iptables -I input_wan_rule -s 192.168.0.0/16  -j ACCEPT
 EOF
+fi
 
 # dnsmasq
 uci set dhcp.@dnsmasq[0].rebind_protection='0'

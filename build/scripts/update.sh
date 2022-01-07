@@ -13,6 +13,7 @@ set -e
 # 用户可以声明上面文件路径来本地不联网升级
 
 NO_NET=''
+: ${VER:=} # 用户本地升级的固件文件路径，是压缩包
 
 # 必须 /tmp 目录里操作
 WORK_DIR=/tmp/update
@@ -127,34 +128,46 @@ function r2s(){
         fi
         mountpoint -q  /tmp/update/download || mount /dev/${block_device}p${part_num} /tmp/update/download
         USER_FILE=/tmp/update/download/openwrt.img.gz
-        rm -f ${USER_FILE}
-        wget https://ghproxy.com/https://github.com/zhangguanzhang/Actions-OpenWrt/releases/download/fs/openwrt-rockchip-armv8-friendlyarm_nanopi-r2s-ext4-sysupgrade.img.gz -O ${USER_FILE}
+        if [ ! -f "${USER_FILE}" ];then
+            wget https://ghproxy.com/https://github.com/zhangguanzhang/Actions-OpenWrt/releases/download/fs/openwrt-rockchip-armv8-friendlyarm_nanopi-r2s-ext4-sysupgrade.img.gz -O ${USER_FILE}
+            wget https://ghproxy.com/https://github.com/zhangguanzhang/Actions-OpenWrt/releases/download/fs/sha256sums -O /tmp/sha256sums
+        fi
     fi
 
     if [ -f "${USER_FILE}" ];then
         info "此次使用本地文件: ${USER_FILE} 来升级"
     else
-        if [ -z "$VER" ];then
-            if [ "${TEST}" != false ];then
-                VER=latest-${FSTYPE}
-            else
-                VER=$(curl -s  https://hub.docker.com/v2/repositories/zhangguanzhang/r2s/tags/?page_size=100 |\
-                    jsonfilter -e '@["results"][*].name' | grep -E release | sort -rn | head -n1)
-            fi
+        if [ "${TEST}" != false ];then
+            IMG_TAG=latest-${FSTYPE}${VER}
+        else
+            IMG_TAG=$(curl -s  https://hub.docker.com/v2/repositories/zhangguanzhang/r2s/tags/?page_size=100 | \
+                jsonfilter -e '@["results"][*].name' | grep -E release | sort -rn | head -n1)
         fi
+        # 没合并到 master 上暂时使用测试固件
+        [ -z "${IMG_TAG}" ] && IMG_TAG=latest-${FSTYPE}${VER}
+
         if [ ! -f "${USER_FILE}" ];then
-            info "开始从 dockerhub 下载包含固件的 docker 镜像，如果拉取失败，可以自己手动 docker pull zhangguanzhang/r2s:${VER}"
-            docker pull zhangguanzhang/r2s:${VER}
-            # CTR_PATH=`docker run --rm zhangguanzhang/r2s:${VER} sh -c 'ls /openwrt*r2s*'`
-            CTR_PATH=$( docker inspect zhangguanzhang/r2s:${VER} --format '{{ .Config.Labels }}' | grep -Eo 'openwrt-.+img.gz' )
+            info "开始从 dockerhub 下载包含固件的 docker 镜像，如果拉取失败，可以自己手动 docker pull zhangguanzhang/r2s:${IMG_TAG}"
+            docker pull zhangguanzhang/r2s:${IMG_TAG}
+            # CTR_PATH=`docker run --rm zhangguanzhang/r2s:${IMG_TAG} sh -c 'ls /openwrt*r2s*'`
+            CTR_PATH=$( docker inspect zhangguanzhang/r2s:${IMG_TAG} --format '{{ .Config.Labels }}' | grep -Eo 'openwrt-.+img.gz' )
             # openwrt-rockchip-armv8-friendlyarm_nanopi-r2s-ext4-sysupgrade.img.gz
             # openwrt-rockchip-armv8-friendlyarm_nanopi-r2s-squashfs-sysupgrade.img.gz
             info "开始从 docker 镜像里提取固件的 tar.gz 压缩文件到: ${USER_FILE}"
-            docker create --name update zhangguanzhang/r2s:${VER}
+            docker create --name update zhangguanzhang/r2s:${IMG_TAG}
             docker cp update:/${CTR_PATH} ${USER_FILE}
+            docker cp update:/sha256sums /tmp/
             docker rm update
-            docker rmi zhangguanzhang/r2s:${VER}
+            IMG_EXIST=1
         fi
+    fi
+    if [ -f /tmp/sha256sums ];then
+        file_sum=`sha256sum ${USER_FILE} | awk '{print $1}'`
+        if ! grep -Eq "${file_sum}" /tmp/sha256sums;then
+            rm -f ${USER_FILE}
+            err '文件校验失败，文件可能损坏，请再次重试'
+        fi
+        success '文件校验成功'
     fi
     if [ -f "${USER_FILE}" ] && [ ! -f "${USE_FILE}" ];then
         info "开始解压 ${USER_FILE} 到 ${USE_FILE}"
@@ -203,6 +216,12 @@ function r2s(){
         tarOPts=""
         tar --help |& grep -q -- --touch && tarOPts=m
         tar zxf${tarOPts} back.tar.gz -C /mnt/img # -m 忽略时间戳的警告
+        opkg list-installed | grep -E "luci-(i18n|app)-" | cut -d ' '  -f1 | \
+            sort -r | xargs -n1 echo opkg install --force-overwrite > /mnt/img/packages_needed
+        if [ "${VER}" == '-slim' ];then
+            sed -i '/exit/i\sed -i "/packages_needed/d" /etc/rc.local; [ -e /packages_needed ] && (mv /packages_needed /packages_needed.installed && sh /packages_needed.installed)\' /mnt/img/etc/rc.local
+            sed -i '1i opkg update' /mnt/img/packages_needed
+        fi
         debug df -h
         rm back.tar.gz
         success '备份文件已经写入，移除挂载'
@@ -273,29 +292,35 @@ function r2s(){
 
     cd ${WORK_DIR}
 
-    sleep 1
+    sleep 5
     # openwrt 存在 auto mount，此处取消挂载
     grep -q ${lodev}p1 /proc/mounts && umount ${lodev}p1
     grep -q ${lodev}p2 /proc/mounts && umount ${lodev}p2
     sleep 1
     if [ "$IMG_FSTYPE" = 'ext4' ];then
-        e2fsck -yf ${lodev}p2 || true
+        try_fsck=0
+        while [ "$try_fsck" -le 10 ];do
+            e2fsck -y -f ${lodev}p2 && break ||
+            let try_fsck+1
+        done
         resize2fs ${lodev}p2
     fi
     sleep 1
+    sync
     # squashfs 可能提前 -d 了，这里判断的逻辑兼容 ext4
     losetup -l -O NAME -n | grep -Eqw $lodev && losetup -d $lodev
     sleep 1
+    [ -n "$IMG_EXIST" ] && docker rmi zhangguanzhang/r2s:${IMG_TAG}
     success '正在打包...'
     warning '开始写入，请勿中断...'
     if [ -f "${IMG_FILE}" ]; then
         echo 1 > /proc/sys/kernel/sysrq
         echo u > /proc/sysrq-trigger && umount / || true
         #pv FriendlyWrt.img | dd of=/dev/$block_device conv=fsync
-        #dd if=${IMG_FILE} of=/dev/$block_device oflag=direct conv=sparse status=progress bs=1M
-        /tmp/ddnz ${IMG_FILE} /dev/$block_device
+        dd if=${IMG_FILE} of=/dev/$block_device oflag=direct conv=sparse status=progress bs=1M
+        #/tmp/ddnz ${IMG_FILE} /dev/$block_device
         # success '刷机完毕，正在重启...'
-        printf '%b\n' "\033[1;32m[SUCCESS] 刷机完毕，正在重启...\033[0m"
+        printf '%b\n' "\033[1;32m[SUCCESS] 刷机完毕，正在重启，如果重启无响应请拔插电源...\033[0m"
         echo b > /proc/sysrq-trigger
     fi
 }
@@ -316,7 +341,7 @@ function opkgUpdate(){
             NO_NET=1
         fi
     else # slim 固件
-        if grep -Eq '^\s*src.gz\s+\S+\s+file' *.conf;then
+        if grep -Eq '^\s*src.gz\s+\S+\s+file' /etc/opkg/*.conf;then
             opkg update
         fi
     fi
@@ -340,6 +365,10 @@ function main(){
                 err "暂不支持该文件系统: ${LOCAL_FSTYPE}"
                 ;;
         esac
+    fi
+    [ "${VER}" == 'slim' ] && VER=-slim
+    if [ -z "$VER" ] && [ -d /local_feed/ ];then
+        VER=-slim
     fi
 
     board_id=$(jsonfilter -e '@["model"].id' < /etc/board.json | \

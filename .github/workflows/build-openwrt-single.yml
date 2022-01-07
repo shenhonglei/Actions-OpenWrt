@@ -57,6 +57,7 @@ jobs:
     runs-on: ${{ github.event.inputs.os }}
     outputs:
       imageBuilder: ${{ steps.organize.outputs.imageBuilder }}
+      build_target: ${{ steps.organize.outputs.build_target }}
     name: "编译 ${{matrix.target}} - config: ${{ github.event.inputs.config }}"
     strategy:
       fail-fast: false
@@ -67,8 +68,8 @@ jobs:
     - name: Checkout
       uses: actions/checkout@main
 
-    - name: install docker
-      uses: docker-practice/actions-setup-docker@master
+    # - name: install docker
+    #   uses: docker-practice/actions-setup-docker@master
       
     - name: prinf info
       run: |
@@ -95,6 +96,9 @@ jobs:
         find gh_* -type f -name gh -exec mv {} /usr/local/bin/ \;
         sudo chmod a+x /usr/local/bin/gh
         gh auth login --with-token <<< ${{ secrets.gh_token }}
+        if command -v docker &>/dev/null && [ -n "${DOCKER_PASS}" ];then
+          docker login -u zhangguanzhang -p ${DOCKER_PASS}
+        fi
 
     - name: Clone source code
       working-directory: /workdir
@@ -157,7 +161,7 @@ jobs:
             # https://forum.openwrt.org/t/using-precompiled-toolchain/87446/6
             mkdir -p cache/{build_dir,staging_dir} openwrt/{build_dir,staging_dir}
             (
-              if [ -z "$NO_CACHE" ];then
+              if [ "$NO_CACHE" != 1 ];then
                 cd cache
                 find build_dir/{host*,toolchain-*} -name .built\* -exec touch {} \;
                 touch staging_dir/{host*,toolchain-*}/stamp/.*
@@ -166,7 +170,7 @@ jobs:
             sudo mount --bind cache/build_dir    openwrt/build_dir
             sudo mount --bind cache/staging_dir  openwrt/staging_dir
             pushd openwrt
-            if [ -z "$NO_CACHE" ];then
+            if [ "$NO_CACHE" != 1 ];then
               cp .config config.buildinfo
               sed_num=$( grep -n '$(TOPDIR)/.config' target/imagebuilder/Makefile | cut -d: -f1 )
               sed -ri ${sed_num}'{s#cp#& -a $(TOPDIR)/files $(TOPDIR)/*.buildinfo#;s#.config$##;}' target/imagebuilder/Makefile
@@ -199,7 +203,7 @@ jobs:
         sed -ri 's@^#\s(CONFIG_.+?_UPX) is not set@\1=y@' .config
         make defconfig
         # 开启 imagebuilder 的话 保留一个.config.bak 给非 slim 使用
-        if [ "${{matrix.target}}" != N1 ] && [ -z "$NO_CACHE" ];then
+        if [ "${{matrix.target}}" != N1 ] && [ "$NO_CACHE" != 1 ];then
           if grep -Eq '^CONFIG_IB=y' .config;then
             mv .config config.slim
             cat config.buildinfo > .config
@@ -218,15 +222,10 @@ jobs:
       run: |
         cd openwrt
         echo -e "$(nproc) thread compile"
-        if [ "${{matrix.target}}" != N1 ] && [ -z "$NO_CACHE" ];then
+        if [ "${{matrix.target}}" != N1 ] && [ "$NO_CACHE" != 1 ];then
           time make -j$(nproc) IGNORE_ERRORS=1 || make -j1 IGNORE_ERRORS=1 || make -j1 V=s IGNORE_ERRORS=1
         else
           make -j$(nproc) || make -j1 || make -j1 V=s
-        fi
-        if grep -Eq '^CONFIG_IB=y' .config;then
-          echo "::set-output name=status::not_upload_compile"
-        else
-          echo "::set-output name=status::success"
         fi
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
@@ -254,10 +253,16 @@ jobs:
         pwd
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-        echo "::set-output name=status::success"
+        if grep -Eq '^CONFIG_IB=y' $GITHUB_WORKSPACE/openwrt/.config;then
+          echo "::set-output name=status::not_upload_compile"
+        else
+          echo "::set-output name=status::success"
+        fi
+
         if ls *-imagebuilder-* &>/dev/null;then
           echo "::set-output name=imageBuilder::openwrt-imagebuilder-${{ env.DEVICE_NAME }}"
         fi
+        echo "::set-output name=build_target::${{matrix.target}}"
 
     # - name: Do something after Compile
     #   if: steps.organize.outputs.status == 'success' && !cancelled()
@@ -269,7 +274,7 @@ jobs:
 
     - name: Upload firmware directory
       uses: actions/upload-artifact@main
-      if: steps.organize.outputs.imageBuilder && !cancelled()
+      if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
         name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: |
@@ -327,8 +332,11 @@ jobs:
       continue-on-error: true
       run: |
         if [ "${{matrix.target}}" != N1 ];then
+          sync
           sudo umount openwrt/{build_dir,staging_dir} cache
-          sudo losetup -l -O NAME -n | awk '$0~"/lede.img"{print $1}' | xargs -r  losetup -d
+          sudo losetup -l -O NAME -n | awk '$0~"/lede.img"{print $1}' | xargs -r sudo losetup -d
+          sleep 2
+          sync
           zstdmt -c --long lede.img | split --numeric=1 -b 2000m - lede.${{matrix.target}}.img.zst.
           ls -l
           gh release -R ${GITHUB_REPOSITORY} upload cache lede.*.img.zst.* --clobber
@@ -386,6 +394,9 @@ jobs:
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
+        if command -v docker &>/dev/null && [ -n "${DOCKER_PASS}" ];then
+          docker login -u zhangguanzhang -p ${DOCKER_PASS}
+        fi
 
     - name: Download imagebuilder (Artifact)
       uses: actions/download-artifact@v2
@@ -397,8 +408,10 @@ jobs:
       id: compile
       run: |
         ls -l
+        \cp -a ${GITHUB_WORKSPACE}/build/${{ needs.build.outputs.build_target }}/* ${GITHUB_WORKSPACE}/build/common.buildinfo ${GITHUB_WORKSPACE}/
         tar xf openwrt-imagebuilder-*.tar.xz
         rm -f openwrt-imagebuilder-*.tar.xz
+        ln -sf openwrt-imagebuilder-* openwrt
         cd openwrt-imagebuilder-*
         ls -l
 
@@ -421,9 +434,9 @@ jobs:
 
         extra_pkgs=" -luci-app-ssr-plus -luci-app-samba"
         if [ "${{matrix.target}}" == 'slim' ];then
-          PACKAGES=$( grep -Po '^CONFIG_PACKAGE_\K[^A-Z=]+' common.buildinfo | sort | tr '\n' ' ' )
+          PACKAGES=$( grep -Po '^CONFIG_PACKAGE_\K[^A-Z=]+' common.buildinfo | tr '\n' ' ' )
         else
-          PACKAGES=$( grep -Po '^CONFIG_PACKAGE_\K[^A-Z=]+(?==y)' full.buildinfo | xargs -n1 -i grep -o {} package.list | sort -u | xargs echo )
+          PACKAGES=$( grep -Po '^CONFIG_PACKAGE_\K[^A-Z=]+(?==y)' full.buildinfo | xargs -n1 -i grep -o {} package.list | awk '!a[$0]++' | xargs echo )
         fi
         make image PACKAGES="$PACKAGES ${extra_pkgs}" FILES="files" |& tee -a /tmp/log
         REMOVE_PKGS=$( grep -Po 'Cannot install package \K[^.]+' /tmp/log | awk '{printf "-%s ",$0}' )
