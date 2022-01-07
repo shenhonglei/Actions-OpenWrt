@@ -223,7 +223,11 @@ jobs:
         else
           make -j$(nproc) || make -j1 || make -j1 V=s
         fi
-        echo "::set-output name=status::success"
+        if grep -Eq '^CONFIG_IB=y' .config;then
+          echo "::set-output name=status::not_upload_compile"
+        else
+          echo "::set-output name=status::success"
+        fi
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
@@ -255,17 +259,17 @@ jobs:
           echo "::set-output name=imageBuilder::openwrt-imagebuilder-${{ env.DEVICE_NAME }}"
         fi
 
-    - name: Do something after Compile
-      if: steps.organize.outputs.status == 'success' && !cancelled()
-      run: |
-        cd openwrt
-        if [ -f "$GITHUB_WORKSPACE/$DIY_AFTER" ];then
-          bash $GITHUB_WORKSPACE/$DIY_AFTER
-        fi
+    # - name: Do something after Compile
+    #   if: steps.organize.outputs.status == 'success' && !cancelled()
+    #   run: |
+    #     cd openwrt
+    #     if [ -f "$GITHUB_WORKSPACE/$DIY_AFTER" ];then
+    #       bash $GITHUB_WORKSPACE/$DIY_AFTER
+    #     fi
 
     - name: Upload firmware directory
       uses: actions/upload-artifact@main
-      if: steps.organize.outputs.status == 'success' && !cancelled()
+      if: steps.organize.outputs.imageBuilder && !cancelled()
       with:
         name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: |
@@ -320,11 +324,13 @@ jobs:
     - name: Upload cache to release
       id: up_cache
       if: '!cancelled()'
+      continue-on-error: true
       run: |
         if [ "${{matrix.target}}" != N1 ];then
           sudo umount openwrt/{build_dir,staging_dir} cache
           sudo losetup -l -O NAME -n | awk '$0~"/lede.img"{print $1}' | xargs -r  losetup -d
           zstdmt -c --long lede.img | split --numeric=1 -b 2000m - lede.${{matrix.target}}.img.zst.
+          ls -l
           gh release -R ${GITHUB_REPOSITORY} upload cache lede.*.img.zst.* --clobber
         fi
 
@@ -398,30 +404,35 @@ jobs:
 
         echo -e "$(nproc) thread compile"
         ls -1 packages/*.ipk | wc -l
+        ls packages/
 
         > /tmp/log
-        if [ "${{matrix.target}}" != N1 ];then
+        if [ "${{matrix.target}}" == 'slim' ];then
           mkdir -p files/local_feed && sudo mount --bind packages files/local_feed
-          sed -i 's/luci-app-[^ ]*//g' include/target.mk $(find target/ -name Makefile)
-          #ls packages/*.ipk | xargs -n1 basename > package.list
-          #PACKAGES=$(grep -v CONFIG_PACKAGE_luci-app common.buildinfo | grep -Po '^CONFIG_PACKAGE_\K[^A-Z=]+(?==y)' | xargs -n1 -i grep -o {} package.list | sort -u | xargs echo )
-          #extra_pkgs="luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn luci-app-ttyd bash default-settings luci-app-docker -luci-app-ssr-plus -luci-app-samba"
-
-          PACKAGES=$( grep -Po '^CONFIG_PACKAGE_\K[^A-Z=]+' common.buildinfo | sort | tr '\n' ' ' )
-          extra_pkgs=" -luci-app-ssr-plus -luci-app-samba"
-          make image PACKAGES="$PACKAGES ${extra_pkgs}" FILES="files" |& tee -a /tmp/log
-          REMOVE_PKGS=$( grep -Po 'Cannot install package \K[^.]+' /tmp/log | awk '{printf "-%s ",$0}' )
-          if [ -n "$REMOVE_PKGS" ];then
-            echo "打包报错，已下包存在依赖问题: ${REMOVE_PKGS}"
-            echo "尝试移除上面的包打包"
-            # 不删除则会文件已存在而不更新签名，貌似这样也解决不了。。
-            rm -f files/local_feed/Packages*
-            make image PACKAGES="$PACKAGES ${extra_pkgs} ${REMOVE_PKGS}" FILES="files"
-          fi
           echo "suffix=-slim" >> $GITHUB_ENV
         else
-          make image FILES="files"
           echo "suffix=" >> $GITHUB_ENV
+        fi
+
+        sed -i 's/luci-app-[^ ]*//g' include/target.mk $(find target/ -name Makefile)
+        ls packages/*.ipk | xargs -n1 basename > package.list
+        #PACKAGES=$(grep -v CONFIG_PACKAGE_luci-app common.buildinfo | grep -Po '^CONFIG_PACKAGE_\K[^A-Z=]+(?==y)' | xargs -n1 -i grep -o {} package.list | sort -u | xargs echo )
+        #extra_pkgs="luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn luci-app-ttyd bash default-settings luci-app-docker -luci-app-ssr-plus -luci-app-samba"
+
+        extra_pkgs=" -luci-app-ssr-plus -luci-app-samba"
+        if [ "${{matrix.target}}" == 'slim' ];then
+          PACKAGES=$( grep -Po '^CONFIG_PACKAGE_\K[^A-Z=]+' common.buildinfo | sort | tr '\n' ' ' )
+        else
+          PACKAGES=$( grep -Po '^CONFIG_PACKAGE_\K[^A-Z=]+(?==y)' full.buildinfo | xargs -n1 -i grep -o {} package.list | sort -u | xargs echo )
+        fi
+        make image PACKAGES="$PACKAGES ${extra_pkgs}" FILES="files" |& tee -a /tmp/log
+        REMOVE_PKGS=$( grep -Po 'Cannot install package \K[^.]+' /tmp/log | awk '{printf "-%s ",$0}' )
+        if [ -n "$REMOVE_PKGS" ];then
+          echo "打包报错，已下包存在依赖问题: ${REMOVE_PKGS}"
+          echo "尝试移除上面的包打包"
+          # 不删除则会文件已存在而不更新签名，貌似这样也解决不了。。,后面改 sed -ri '/check_signature/s@^[^#]@#&@' /etc/opkg.conf 暂时屏蔽前面错误
+          rm -f files/local_feed/Packages*
+          make image PACKAGES="$PACKAGES ${extra_pkgs} ${REMOVE_PKGS}" FILES="files"
         fi
 
         #make image -j$(nproc) PACKAGES='-luci-app-ipsec-vpnd' || make image -j1 V=s PACKAGES='-luci-app-ipsec-vpnd' 
@@ -440,6 +451,14 @@ jobs:
         ls -lh
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "::set-output name=status::success"
+
+    - name: Do something after Compile
+      if: steps.organize.outputs.status == 'success' && !cancelled()
+      run: |
+        cd openwrt-imagebuilder-*/
+        if [ -f "$GITHUB_WORKSPACE/$DIY_AFTER" ];then
+          bash $GITHUB_WORKSPACE/$DIY_AFTER ${{ env.suffix }}
+        fi
 
     - name: Upload firmware directory
       uses: actions/upload-artifact@main

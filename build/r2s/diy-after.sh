@@ -1,5 +1,7 @@
 #!/bin/bash
 
+target=$1
+
 function upload_dockerhub(){
 
     local hub_img=zhangguanzhang/r2s BUILD_DIR=$(mktemp -d)
@@ -10,16 +12,17 @@ function upload_dockerhub(){
     FSTYPE=${FSTYPE%-*}
 
     cp $1 ${BUILD_DIR}/
-    cp $(dirname $1)/{sha256sums,config.buildinfo,feeds.buildinfo,version.buildinfo} ${BUILD_DIR}/
+    # cp $(dirname $1)/{sha256sums,config.buildinfo,feeds.buildinfo,version.buildinfo} ${BUILD_DIR}/
+    cp $(dirname $1)/sha256sums ${BUILD_DIR}/
 cat >${BUILD_DIR}/Dockerfile << EOF
 FROM alpine
 LABEL FILE=$file
 LABEL NUM=${GITHUB_RUN_NUMBER}
 COPY * /
 EOF
-    [ "${BRANCH}" != main ] && tag=latest
+    [ "${BRANCH}" != main ] && tag=latest${target}
 
-    local build_img=${hub_img}:${tag}-${FSTYPE}
+    local build_img=${hub_img}:${tag}-${FSTYPE}${target}
 
     (
         cd ${BUILD_DIR}
