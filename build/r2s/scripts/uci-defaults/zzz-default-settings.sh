@@ -22,6 +22,9 @@ fi
 if [ -d /usr/lib/lua/luci/view/themes/argon_blue/ ];then
     uci set luci.main.mediaurlbase='/luci-static/argon_blue'
 fi
+if [ -d /usr/lib/lua/luci/view/themes/argon/ ];then
+    uci set luci.main.mediaurlbase='/luci-static/argon'
+fi
 uci commit luci
 # 此文件名注意ls 排序，下面也行
 # sed -ri "/option mediaurlbase/s#(/luci-static/)[^']+#\1argon_blue#" /etc/config/luci

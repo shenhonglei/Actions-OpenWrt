@@ -13,7 +13,7 @@ set -e
 # 用户可以声明上面文件路径来本地不联网升级
 
 NO_NET=''
-: ${VER:=} # 用户本地升级的固件文件路径，是压缩包
+: ${VER:=} # slim or full
 
 # 必须 /tmp 目录里操作
 WORK_DIR=/tmp/update
@@ -204,7 +204,12 @@ function r2s(){
         rm -rf /mnt/img
         mv /mnt/img_sq /mnt/img
     fi
-    
+
+    # 无论备份不备份，都把应用列表保留到新固件的 rootfs 里
+    opkg list-installed | grep -E "luci-(i18n|app)-" | cut -d ' '  -f1 | \
+        sort -r | xargs -n1 echo opkg install --force-overwrite > /mnt/img/packages_needed
+    sed -i '1i opkg update' /mnt/img/packages_needed
+
     if [ "$SKIP_BACK" != false ] || [ -n "$NEED_GROW" ] ;then
         if [ -n "$NEED_GROW" ];then
             warning '注意：借助初版扩容，或者其他人固件升级到我的固件时候只备份网卡配置文件'
@@ -216,11 +221,8 @@ function r2s(){
         tarOPts=""
         tar --help |& grep -q -- --touch && tarOPts=m
         tar zxf${tarOPts} back.tar.gz -C /mnt/img # -m 忽略时间戳的警告
-        opkg list-installed | grep -E "luci-(i18n|app)-" | cut -d ' '  -f1 | \
-            sort -r | xargs -n1 echo opkg install --force-overwrite > /mnt/img/packages_needed
         if [ "${VER}" == '-slim' ];then
             sed -i '/exit/i\sed -i "/packages_needed/d" /etc/rc.local; [ -e /packages_needed ] && (mv /packages_needed /packages_needed.installed && sh /packages_needed.installed)\' /mnt/img/etc/rc.local
-            sed -i '1i opkg update' /mnt/img/packages_needed
         fi
         debug df -h
         rm back.tar.gz
@@ -370,6 +372,7 @@ function main(){
     if [ -z "$VER" ] && [ -d /local_feed/ ];then
         VER=-slim
     fi
+    [ "$VER" == full ] && VER=''
 
     board_id=$(jsonfilter -e '@["model"].id' < /etc/board.json | \
         sed -r -e 's/friendly.*,nanopi-//' )

@@ -30,7 +30,14 @@ sed -ri '\%\$\(INSTALL_DIR\) \$\(1\)/etc/(docker|init\.d|config)%d' feeds/packag
 # Modify default theme
 # https://github.com/jerrykuku/luci-theme-argon/tree/18.06
 # https://github.com/kenzok8/openwrt-packages
-sed -ri 's/luci-theme-\S+/luci-theme-argonne/g' feeds/luci/collections/luci/Makefile  # feeds/luci/modules/luci-base/root/etc/config/luci
+sed -ri 's/luci-theme-\S+/luci-theme-argon/g' feeds/luci/collections/luci/Makefile  # feeds/luci/modules/luci-base/root/etc/config/luci
+rm -rf ./package/lean/luci-theme-argon
+mkdir -p package/community
+pushd package/community
+git clone --depth=1 -b 18.06 https://github.com/jerrykuku/luci-theme-argon
+git clone --depth=1 https://github.com/jerrykuku/luci-app-argon-config
+popd
+#svn co https://github.com/immortalwrt/luci/trunk/themes/luci-theme-argon ./package/lean/luci-theme-argon
 
 # https://github.com/openwrt/luci/issues/5638
 sed -i '2a [ ! -f /etc/openwrt_release ] && exit 0' package/lean/luci-app-filetransfer/root/etc/uci-defaults/luci-filetransfer

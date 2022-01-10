@@ -353,11 +353,10 @@ CONFIG_PACKAGE_luci-proto-relay=y
 # LuCI-theme:
 # https://github.com/jerrykuku/luci-theme-argon/tree/18.06
 # https://github.com/kenzok8/openwrt-packages
-CONFIG_PACKAGE_luci-app-argonne-config=y
-CONFIG_PACKAGE_luci-theme-argonne=y
+CONFIG_PACKAGE_luci-app-argon-config=y
+CONFIG_PACKAGE_luci-theme-argon=y
 
 # CONFIG_PACKAGE_luci-theme-ifit is not set
-# CONFIG_PACKAGE_luci-theme-argon is not set
 # CONFIG_PACKAGE_luci-theme-atmaterial_new is not set
 # CONFIG_PACKAGE_luci-theme-bootstrap is not set
 # CONFIG_PACKAGE_luci-theme-edge is not set

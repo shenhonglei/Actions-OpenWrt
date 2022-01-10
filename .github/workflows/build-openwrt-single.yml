@@ -216,6 +216,7 @@ jobs:
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
+        cat .config
 
     - name: Compile the firmware
       id: compile
@@ -235,7 +236,7 @@ jobs:
       if: (!cancelled())
       run: |
         df -hT
-        ls -l openwrt
+        ls -l openwrt/
         ls -lh openwrt/bin/targets/*/*
 
     - name: Upload bin directory
