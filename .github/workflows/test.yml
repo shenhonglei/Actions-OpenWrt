@@ -26,7 +26,8 @@ jobs:
       run: |
         echo  ${{matrix.target}}
         echo  '${{ toJson(matrix.target) }}'
-        echo  '${{ toJson(github) }}'
+        ls -l
+        
         find ${GITHUB_WORKSPACE}/.github/workflows/ -type f -exec grep -Pl '^name:\s*${{ github.workflow }}' \;
       
         echo "::set-output name=matrix::${{ toJson(matrix.target) }}"
