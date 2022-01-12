@@ -19,14 +19,15 @@ jobs:
           - "1"
           - "2"
     steps:
+    - name: Checkout
+      uses: actions/checkout@main
     - name: prinf info
       id: set-matrix
       run: |
         echo  ${{matrix.target}}
         echo  '${{ toJson(matrix.target) }}'
         echo  '${{ toJson(github) }}'
-        echo  '${{ toJson(workflow) }}'
-        
+        find ${GITHUB_WORKSPACE}/.github/workflows/ -type f -exec grep -Pl '^name:\s*${{ github.workflow }}'
       
         echo "::set-output name=matrix::${{ toJson(matrix.target) }}"
         
