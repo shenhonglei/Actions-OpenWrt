@@ -28,7 +28,7 @@ jobs:
         echo  '${{ toJson(matrix.target) }}'
         ls -la
         pwd
-        echo ${GITHUB_WORKSPACE}
+        tree ${GITHUB_WORKSPACE}/.github
         
         find ${GITHUB_WORKSPACE}/.github/workflows/ -type f -exec grep -Pl '^name:\s*${{ github.workflow }}' \;
       
