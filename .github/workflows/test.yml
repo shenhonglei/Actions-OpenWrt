@@ -20,7 +20,7 @@ jobs:
     - name: prinf info
       run: |
         echo  ${{matrix.target}}
-        echo  "${{ toJson(matrix) }}"
+        echo  '${{ toJson(matrix) }}'
         
   build_slim:
     needs: build
