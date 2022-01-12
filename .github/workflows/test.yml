@@ -25,6 +25,9 @@ jobs:
         echo  ${{matrix.target}}
         echo  '${{ toJson(matrix.target) }}'
         echo  '${{ toJson(job) }}'
+        echo  '${{ toJson(jobs) }}'
+        echo  '${{ toJson(strategy) }}'
+        
         #echo "::set-output name=matrix::$TASKS"
         
   build_slim:
