@@ -20,6 +20,7 @@ jobs:
     - name: prinf info
       run: |
         echo  ${{matrix.target}}
+        echo  ${{matrix}}
         
   build_slim:
     needs: build
