@@ -16,8 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         target: 
-          - "1"
-          - "2"
+          - "[1,2,3]" # sed_for_matrix
     steps:
     - name: Checkout
       uses: actions/checkout@main
@@ -26,14 +25,8 @@ jobs:
       run: |
         echo  ${{matrix.target}}
         echo  '${{ toJson(matrix.target) }}'
-        ls -la
-        pwd
-        tree ${GITHUB_WORKSPACE}/.github
-        echo ${{ github.workflow }}
-        echo find ${GITHUB_WORKSPACE}/.github/workflows/ -type f -exec grep -Pl '^name:\s*${{ github.workflow }}' \;
+        current_workflow_file_name=$(find ${GITHUB_WORKSPACE}/.github/workflows/ -type f -exec grep -Pl '^name:\s*${{ github.workflow }}' {} \;)
         
-        find ${GITHUB_WORKSPACE}/.github/workflows/ -type f -exec grep -Pl '^name:\s*${{ github.workflow }}' {} \;
-      
         echo "::set-output name=matrix::${{ toJson(matrix.target) }}"
         
   build_slim:
