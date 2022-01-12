@@ -8,7 +8,7 @@ jobs:
     runs-on: 'ubuntu-20.04'
     
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      build_matrix: ${{ steps.set-matrix.outputs.matrix }}
       imageBuilder: ${{ steps.organize.outputs.imageBuilder }}
       build_target: ${{ steps.organize.outputs.build_target }}
     name: "编译 ${{matrix.target}}"
@@ -24,20 +24,19 @@ jobs:
       run: |
         echo  ${{matrix.target}}
         echo  '${{ toJson(matrix.target) }}'
-        echo  '${{ toJson(strategy) }}'
-        
-        #echo "::set-output name=matrix::$TASKS"
+      
+        echo "::set-output name=matrix::${{ toJson(matrix.target) }}"
         
   build_slim:
     needs: build
     runs-on: 'ubuntu-20.04'
-    name: "编译 ${{matrix.target}} - config: ${{ github.event.inputs.config }}"
+    name: "编译 ${{matrix.target}}"
     strategy:
       fail-fast: false
       matrix:
         target: 
-          - "slim"
-          - ""
+          - ${{ needs.build.outputs.build_matrix }}
+        type: [slim,""]
     steps:
     - name: prinf info
       run: |
