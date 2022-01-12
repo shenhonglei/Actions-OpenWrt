@@ -45,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJson(needs.build.outputs.build_matrix) }}
+        target: ${{ fromJson(needs.set_matrix.outputs.build_matrix) }}
         type: [slim,""]
     steps:
     - name: prinf info
