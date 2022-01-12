@@ -1,0 +1,53 @@
+name: test
+
+on: [push]
+
+
+jobs:
+  set_matrix:
+    runs-on: 'ubuntu-20.04'
+    outputs:
+      build_matrix: ${{ steps.set-matrix.outputs.matrix }}
+
+    name: "set matrix: ${{matrix.target}}"
+    strategy:
+      fail-fast: false
+      matrix:
+        target: 
+          - "[1,2,3]" # sed_for_matrix
+    steps:
+    - name: prinf info
+      id: set-matrix
+      run: |
+        echo "::set-output name=matrix::${{ toJson(matrix.target) }}"
+  build:
+    needs: set_matrix
+    runs-on: 'ubuntu-20.04'
+    outputs:
+      build_matrix: ${{ steps.set-matrix.outputs.matrix }}
+      imageBuilder: ${{ steps.organize.outputs.imageBuilder }}
+      build_target: ${{ steps.organize.outputs.build_target }}
+    name: "编译 ${{matrix.target}}"
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.set_matrix.outputs.build_matrix) }}
+    steps:
+    - name: prinf info
+      id: set-matrix
+      run: |
+        echo  ${{matrix.target}}
+        
+  build_slim:
+    needs: [set_matrix,build]
+    runs-on: 'ubuntu-20.04'
+    name: "编译 ${{matrix.target}}, ${{matrix.type}}"
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.set_matrix.outputs.build_matrix) }}
+        type: [slim,""]
+    steps:
+    - name: prinf info
+      run: |
+        echo  ${{matrix.target}}
