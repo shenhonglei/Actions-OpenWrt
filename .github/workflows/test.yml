@@ -28,6 +28,7 @@ jobs:
         current_workflow_file_name=$(find ${GITHUB_WORKSPACE}/.github/workflows/ -type f -exec grep -Pl '^name:\s*${{ github.workflow }}' {} \;)
         
         echo "::set-output name=matrix::${{ matrix.target }}"
+        echo ${{  }}
         
   build_slim:
     needs: build
@@ -36,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ needs.build.outputs.build_matrix }}
+        target: ${{ toJson(needs.build.outputs.build_matrix) }}
         type: [slim,""]
     steps:
     - name: prinf info
