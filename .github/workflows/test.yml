@@ -27,7 +27,7 @@ jobs:
         echo  '${{ toJson(matrix.target) }}'
         current_workflow_file_name=$(find ${GITHUB_WORKSPACE}/.github/workflows/ -type f -exec grep -Pl '^name:\s*${{ github.workflow }}' {} \;)
         
-        echo "::set-output name=matrix::${{ matrix.target }}"
+        echo "::set-output name=matrix::${{ toJson(matrix.target) }}"
         echo ${{  }}
         
   build_slim:
@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ toJson(needs.build.outputs.build_matrix) }}
+        target: ${{ fromJson(needs.build.outputs.build_matrix) }}
         type: [slim,""]
     steps:
     - name: prinf info
