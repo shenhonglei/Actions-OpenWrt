@@ -1,0 +1,39 @@
+name: test
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+    inputs:
+
+
+
+jobs:
+  build:
+    runs-on: 'ubuntu-20.04'
+    outputs:
+      imageBuilder: ${{ steps.organize.outputs.imageBuilder }}
+      build_target: ${{ steps.organize.outputs.build_target }}
+    name: "编译 ${{matrix.target}}"
+    strategy:
+      fail-fast: false
+      matrix:
+        target: 
+          - "1"
+          - "2"
+    - name: prinf info
+      run: |
+        echo  ${{matrix.target}}
+        
+  build_slim:
+    needs: build
+    runs-on: 'ubuntu-20.04'
+    name: "编译 ${{matrix.target}} - config: ${{ github.event.inputs.config }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        target: 
+          - "slim"
+          - ""
+    - name: prinf info
+      run: |
+        echo  ${{matrix.target}}
