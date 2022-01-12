@@ -6,9 +6,11 @@ on: [push]
 jobs:
   build:
     runs-on: 'ubuntu-20.04'
-#     outputs:
-#       imageBuilder: ${{ steps.organize.outputs.imageBuilder }}
-#       build_target: ${{ steps.organize.outputs.build_target }}
+    
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      imageBuilder: ${{ steps.organize.outputs.imageBuilder }}
+      build_target: ${{ steps.organize.outputs.build_target }}
     name: "编译 ${{matrix.target}}"
     strategy:
       fail-fast: false
@@ -18,9 +20,12 @@ jobs:
           - "2"
     steps:
     - name: prinf info
+      id: set-matrix
       run: |
         echo  ${{matrix.target}}
         echo  '${{ toJson(matrix.target) }}'
+        echo  '${{ toJson(job) }}'
+        #echo "::set-output name=matrix::$TASKS"
         
   build_slim:
     needs: build
