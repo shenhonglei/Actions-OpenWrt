@@ -32,7 +32,7 @@ jobs:
   build_slim:
     needs: build
     runs-on: 'ubuntu-20.04'
-    name: "编译 ${{matrix.target}}"
+    name: "编译 ${{matrix.target}}, ${{matrix.type}}"
     strategy:
       fail-fast: false
       matrix:
