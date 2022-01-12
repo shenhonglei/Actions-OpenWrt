@@ -10,9 +10,9 @@ on:
 jobs:
   build:
     runs-on: 'ubuntu-20.04'
-    outputs:
-      imageBuilder: ${{ steps.organize.outputs.imageBuilder }}
-      build_target: ${{ steps.organize.outputs.build_target }}
+#     outputs:
+#       imageBuilder: ${{ steps.organize.outputs.imageBuilder }}
+#       build_target: ${{ steps.organize.outputs.build_target }}
     name: "编译 ${{matrix.target}}"
     strategy:
       fail-fast: false
@@ -20,6 +20,7 @@ jobs:
         target: 
           - "1"
           - "2"
+    steps:
     - name: prinf info
       run: |
         echo  ${{matrix.target}}
@@ -34,6 +35,7 @@ jobs:
         target: 
           - "slim"
           - ""
+    steps:
     - name: prinf info
       run: |
         echo  ${{matrix.target}}
