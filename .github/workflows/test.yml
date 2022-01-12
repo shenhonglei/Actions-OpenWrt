@@ -26,7 +26,9 @@ jobs:
       run: |
         echo  ${{matrix.target}}
         echo  '${{ toJson(matrix.target) }}'
-        ls -l
+        ls -la
+        pwd
+        echo ${GITHUB_WORKSPACE}
         
         find ${GITHUB_WORKSPACE}/.github/workflows/ -type f -exec grep -Pl '^name:\s*${{ github.workflow }}' \;
       
